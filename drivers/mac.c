@@ -1,7 +1,7 @@
 #include "mac.h"
 #include "irq.h"
 #include "string.h"
-#include "test4.h"
+#include "mac_support.h"
 #include "sched.h"
 
 desc_t DMA_recv_desc[64];

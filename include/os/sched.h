@@ -37,15 +37,15 @@
 
 #define GLOBAL_ASID 1
 
-#define USTACK_BASE 0x00010000
+#define USTACK_BASE 0x00400000
 #if GLOBAL_ASID
-#define USTACK_SIZE 0x10000
+#define USTACK_SIZE 0x400000
 #else
 #define USTACK_SIZE 0x1000
 #endif
 
 #define KSTACK_BASE 0xa0f00000
-#define KSTACK_SIZE 0x10000
+#define KSTACK_SIZE 0x100000
 
 typedef struct regs_context
 {

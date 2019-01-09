@@ -1,7 +1,6 @@
 #include "screen.h"
 #include "common.h"
 #include "string.h"
-#include "test3.h"
 
 int screen_cursor_x;
 int screen_cursor_y;

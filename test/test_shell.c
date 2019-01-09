@@ -53,13 +53,11 @@ char read_uart_ch(void)
     return ch;
 }
 
-struct task_info task1 = {"task1", (uint32_t)&phy_regs_task1, USER_PROCESS};
-struct task_info task2 = {"task2", (uint32_t)&phy_regs_task2, USER_PROCESS};
-struct task_info task3 = {"task3", (uint32_t)&phy_regs_task3, USER_PROCESS};
-
+struct task_info task2 = {"edit", (uint32_t)&edit, USER_PROCESS};
+struct task_info task1 = {"task_fs", (uint32_t)&test_fs, USER_PROCESS};
 struct task_info task0 = {"hello", (uint32_t)&hello_world, USER_PROCESS};
 
-struct task_info *test_tasks[16] = {&task0, &task1, &task2, &task3};
+struct task_info *test_tasks[16] = {&task0, &task1, &task2};
 
 static int num_test_tasks = 2;
 
@@ -156,11 +154,19 @@ static void decode(char *origin_cmd)
         deletefs();
         printf("command[delfs] executed\n");
     } else if (strcmp(args[0], "mkdir") == 0) {
-        make_directory(args[1]);
+        make_directory(cmd_count, args);
     } else if (strcmp(args[0], "ls") == 0) {
-        list_directory(args[1]);
+        list_directory(cmd_count, args);
+    } else if (strcmp(args[0], "rm") == 0) {
+        remove_file(cmd_count, args);
+    } else if (strcmp(args[0], "rmdir") == 0) {
+        remove_directory(cmd_count, args);
     } else if (strcmp(args[0], "cd") == 0) {
-        change_directory(args[1]);
+        change_directory(cmd_count, args);
+    } else if (strcmp(args[0], "touch") == 0) {
+        touch_file(cmd_count, args);
+    } else if (strcmp(args[0], "cat") == 0) {
+        cat_file(cmd_count, args);
     } else {
         printf("error: invalid command: %s\n", args[0]);
     }

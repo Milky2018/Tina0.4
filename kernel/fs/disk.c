@@ -1,102 +1,126 @@
 #include "fs.h"
 
+#define check_ino(ino) do { \ 
+    if (ino < 0 || ino >= FS_INODE_TABLE_SIZE * 0x8) \
+    return; \
+} while(0)
+
+#define sdmodify(sector_number, sector_buf, op) do { \
+    sector_read(sector_buf, sector_number); \ 
+    op; \ 
+    sector_write(sector_buf, sector_number); \
+} while (0)
+
 void do_sdread(void *dest, int offset, int size) 
 {
-    sdread((char *)dest, offset + FS_SECTORADDR_BASE * SECTOR_SIZE, size);
+    sdread((char *)dest, offset + FS_BASE * SECTOR_SIZE, size);
 }
 
 void do_sdwrite(void *src, int offset, int size)
 {
-    // if (offset / 0x200 == 0x109)
-    //     printf("109 occurred!\n");
-    sdwrite((char *)src, offset + FS_SECTORADDR_BASE * SECTOR_SIZE, size);
+    sdwrite((char *)src, offset + FS_BASE * SECTOR_SIZE, size);
 }
 
-void sector_write(char *src, int sector)
+void sector_write(void *src, int sector)
 {
     do_sdwrite(src, sector * SECTOR_SIZE, SECTOR_SIZE);
 }
 
+void sector_read(void *dest, int sector)
+{
+    do_sdread(dest, sector * SECTOR_SIZE, SECTOR_SIZE);
+}
+
 void inode_write(inode_entry_t *src, int ino)
 {
-    do_sdwrite(src, FS_INODE_TABLE_BASE * SECTOR_SIZE + ino * FS_INODE_ENTRY_SIZE, FS_INODE_ENTRY_SIZE);
+    check_ino(ino);
+    int sector = ino / 8 + FS_INODE_TABLE_BASE;
+    int offset = ino % 8;
+    inode_entry_t ie[8];
+    sector_read(ie, sector);
+    ie[offset] = *src;
+    sector_write(ie, sector);
 }
 
 void inode_read(inode_entry_t *dest, int ino)
 {
-    do_sdread(dest, FS_INODE_TABLE_BASE * SECTOR_SIZE + ino * FS_INODE_ENTRY_SIZE, FS_INODE_ENTRY_SIZE);
+    check_ino(ino);
+    do_sdread(dest, FS_INODE_TABLE_BASE * SECTOR_SIZE + ino * FS_INODE_SIZE, FS_INODE_SIZE);
 }
 
-int bitmap_search(uint32_t *map, int target, int bound)
+void inode_map_read()
 {
-    int i = 0;
-    int j = 0;
-    uint32_t flat = 0;
-
-    if (target == 1)
-        flat = 0x00;
-    else if (target == 0)
-        flat = 0xffff;
-    else 
-        return -1;
-    
-    for (i = 0; i < bound / 32; i++) {
-        if (map[i] != flat) {
-            for (j = 0; j < 32; j++) {
-                if (((uint32_t)(0x01 << j) & map[i]) == (target << j)) {
-                    return 32 * i + j;
-                }
-            }
-        }
+    int i;
+    for (i = 0; i < FS_INODE_MAP_SIZE; i++) {
+        sector_read(&inode_map.valid_inode_number[0x80 * i], FS_INODE_MAP_BASE + i);
     }
-    return -2;
 }
 
-int bitmap_modify(uint32_t *map, int target, int offset)
+void inode_map_write()
 {
-    int i, j;
-    if (target != 0 && target != 1)
-        return -1;
-
-    i = offset / 32;
-    j = offset % 32;
-    map[i] = (map[i] & ~(0x0001 << j)) | (target << j);
-    return 0;
-}
-
-int sector_alloc()
-{
-    int i = bitmap_search(&sector_map, 0, FS_SECTOR_NUM);
-    bitmap_modify(&sector_map, 1, i);
-    do_sdwrite(&sector_map.valid_sector_number[i / 32], FS_SECTOR_MAP_BASE * SECTOR_SIZE + (i / 32) * 4, 4);
-    return i;
-}
-
-void sector_free(uint32_t sector)
-{
-    if (sector < 0 || sector >= FS_SECTOR_NUM)
-        return;
-    bitmap_modify(&sector_map, 0, sector);
-    do_sdwrite(&sector_map.valid_sector_number[sector / 32], FS_SECTOR_MAP_BASE * SECTOR_SIZE + (sector / 32) * 4, 4);
+    int i;
+    for (i = 0; i < FS_INODE_MAP_SIZE; i++) {
+        sector_write(&inode_map.valid_inode_number[0x80 * i], FS_INODE_MAP_BASE + i);
+    }
 }
 
 int inode_alloc()
 {
-    int i = bitmap_search(&inode_map, 0, FS_INODE_TABLE_SIZE * 0x4);
+    int i = bitmap_search(&inode_map, 0, FS_INODE_TABLE_SIZE * 0x08);
     bitmap_modify(&inode_map, 1, i);
-    do_sdwrite(&inode_map.valid_inode_number[i / 32], FS_INODE_MAP_BASE * SECTOR_SIZE + (i / 32) * 4, 4);
+    inode_map_write();
     return i;
 }
 
 void inode_free(uint32_t ino)
 {
-    if (ino < 0 || ino >= FS_INODE_TABLE_SIZE * 0x4)
-        return;
+    check_ino(ino);
     bitmap_modify(&inode_map, 0, ino);
-    do_sdwrite(&inode_map.valid_inode_number[ino / 32], FS_INODE_MAP_BASE * SECTOR_SIZE + (ino / 32) * 4, 4);
+    inode_map_write();
 }
 
-void print_inode_entry(inode_entry_t *inode)
+void superblock_read()
 {
-    printf("ino: %x    name: %s    ptr[0]: %x\n", inode->ino, inode->name, inode->ptr[0]);
+    sector_read(&superblock, FS_SUPERBLOCK_BASE);
+}
+
+void superblock_write()
+{
+    sector_write(&superblock, FS_SUPERBLOCK_BASE);
+}
+
+void file_block_read(file_block_t *fb, int ino)
+{
+    int i;
+    int sector = ino * FS_BLOCK_SIZE + FS_DATA_BASE;
+    for (i = 0; i < FS_BLOCK_SIZE; i++) {
+        sector_read(&fb->file_content[0x80 * i], sector + i);
+    }
+}
+
+void file_block_write(file_block_t *fb, int ino)
+{
+    int i;
+    int sector = ino * FS_BLOCK_SIZE + FS_DATA_BASE;
+    for (i = 0; i < FS_BLOCK_SIZE; i++) {
+        sector_write(&fb->file_content[0x80 * i], sector + i);
+    }
+}
+
+void dir_block_read(dir_block_t *db, int ino)
+{
+    int i;
+    int sector = ino * FS_BLOCK_SIZE + FS_DATA_BASE;
+    for (i = 0; i < FS_BLOCK_SIZE; i++) {
+        sector_read(&db->dentry[0x10 * i], sector + i);
+    }
+}
+
+void dir_block_write(dir_block_t *db, int ino)
+{
+    int i;
+    int sector = ino * FS_BLOCK_SIZE + FS_DATA_BASE;
+    for (i = 0; i < FS_BLOCK_SIZE; i++) {
+        sector_write(&db->dentry[0x10 * i], sector + i);
+    }
 }
